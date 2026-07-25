@@ -131,3 +131,13 @@ LiveScriber is privacy-first. Transcription always runs on-device. No analytics,
 <p align="center">
   <sub>MIT License · Made with 🎙️ by <a href="https://github.com/appatalks">appatalks</a></sub>
 </p>
+
+---
+
+## Built With Eva-Agent
+
+This project was created with technology developed in [Eva-Agent](https://github.com/appatalks/eva-agent/).
+
+<p align="center">
+  <a href="https://github.com/appatalks/eva-agent/"><img src="assets/Built_with_Eva-Agent.png" alt="Built with Eva-Agent" width="420"></a>
+</p>
