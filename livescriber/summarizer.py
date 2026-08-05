@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
@@ -156,6 +157,49 @@ class Summarizer:
         return t
 
     # ── Copilot CLI backend ────────────────────────────────────────────────
+
+    @staticmethod
+    def get_copilot_model_options() -> list[str]:
+        """Return model names supported by the installed Copilot CLI."""
+        command = Summarizer._build_copilot_command("help", "config")
+        if not command:
+            return ["auto"]
+
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ["auto"]
+
+        if result.returncode != 0:
+            return ["auto"]
+
+        models = Summarizer._parse_copilot_model_options(result.stdout)
+        return ["auto", *models] if models else ["auto"]
+
+    @staticmethod
+    def _parse_copilot_model_options(config_help: str) -> list[str]:
+        """Extract the model catalog from ``copilot help config`` output."""
+        models = []
+        in_model_section = False
+
+        for line in config_help.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("`model`:"):
+                in_model_section = True
+                continue
+            if in_model_section and stripped.startswith("`"):
+                break
+            if in_model_section:
+                match = re.fullmatch(r'- "([^"]+)"', stripped)
+                if match and match.group(1) not in models:
+                    models.append(match.group(1))
+
+        return models
 
     def _summarize_copilot(self, transcript: str) -> str:
         """Summarize via Copilot CLI (copilot --prompt)."""

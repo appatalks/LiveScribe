@@ -296,12 +296,13 @@ class SettingsDialog(QDialog):
         copilot_form = QFormLayout(self.copilot_group)
 
         self.copilot_model_combo = QComboBox()
-        self.copilot_model_combo.addItems([
-            "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5",
-            "gpt-5", "gpt-5.1", "gpt-5.1-codex-mini", "gpt-5.1-codex",
-            "gemini-3-pro-preview",
-        ])
-        self.copilot_model_combo.setCurrentText(config.summarizer.copilot_model)
+        self.copilot_model_combo.addItems(Summarizer.get_copilot_model_options())
+        model_index = self.copilot_model_combo.findText(config.summarizer.copilot_model)
+        self.copilot_model_combo.setCurrentIndex(max(model_index, 0))
+        self.copilot_model_combo.setToolTip(
+            "Models are read from the installed Copilot CLI. "
+            "Auto lets Copilot choose a supported model."
+        )
         copilot_form.addRow("Model:", self.copilot_model_combo)
 
         copilot_auth_row = QHBoxLayout()
