@@ -1,6 +1,8 @@
 """Tests for core module imports and platform-aware behavior."""
 
 import platform
+from subprocess import CompletedProcess
+from unittest import mock
 
 
 class TestImports:
@@ -77,3 +79,40 @@ class TestSummarizerPlatform:
         assert Summarizer._copilot_stderr_has_error("") is False
         assert Summarizer._copilot_stderr_has_error("Error: auth failed") is True
         assert Summarizer._copilot_stderr_has_error("No authentication information found") is True
+
+    def test_copilot_model_options_are_parsed_from_cli_help(self):
+        from livescriber.summarizer import Summarizer
+
+        config_help = """
+`model`: AI model to use for Copilot CLI.
+  - "claude-sonnet-5"
+  - "gpt-5.6-terra"
+
+`contextTier`: context window tier.
+"""
+        with mock.patch.object(
+            Summarizer,
+            "_build_copilot_command",
+            return_value=["copilot", "help", "config"],
+        ), mock.patch(
+            "livescriber.summarizer.subprocess.run",
+            return_value=CompletedProcess([], 0, stdout=config_help, stderr=""),
+        ):
+            assert Summarizer.get_copilot_model_options() == [
+                "auto",
+                "claude-sonnet-5",
+                "gpt-5.6-terra",
+            ]
+
+    def test_copilot_model_options_fall_back_to_auto(self):
+        from livescriber.summarizer import Summarizer
+
+        with mock.patch.object(
+            Summarizer,
+            "_build_copilot_command",
+            return_value=["copilot", "help", "config"],
+        ), mock.patch(
+            "livescriber.summarizer.subprocess.run",
+            return_value=CompletedProcess([], 1, stdout="", stderr="failed"),
+        ):
+            assert Summarizer.get_copilot_model_options() == ["auto"]

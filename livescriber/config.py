@@ -41,7 +41,7 @@ class TranscriptionConfig:
 class SummarizerConfig:
     backend: str = "local"            # copilot | local | ollama-like | openai
     # Copilot CLI settings (uses copilot --prompt)
-    copilot_model: str = "claude-sonnet-4.5"
+    copilot_model: str = "auto"
     # Ollama settings
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
@@ -107,6 +107,13 @@ class AppConfig:
                 summarizer_data = data.get("summarizer", {})
                 if summarizer_data.get("backend") == "ollama":
                     summarizer_data["backend"] = "ollama-like"
+                if summarizer_data.get("copilot_model") in {
+                    "gpt-5.1",
+                    "gpt-5.1-codex",
+                    "gpt-5.1-codex-mini",
+                    "gpt-5.1-codex-max",
+                }:
+                    summarizer_data["copilot_model"] = "auto"
                 if summarizer_data.get("local_model_key") == "gemma-3-4b-it":
                     summarizer_data["local_model_key"] = "llama-3.1-4b-instruct"
                 if summarizer_data.get("local_model_key") == "llama-3.2-3b-instruct":
