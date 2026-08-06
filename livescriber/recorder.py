@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import io
+import platform
 import shutil
 import subprocess
 import threading
@@ -20,6 +21,8 @@ from livescriber.config import AudioConfig
 class Recorder:
     """Captures mic input + system audio output and mixes into a single stream."""
 
+    _SILENCE_RMS_THRESHOLD = 0.002
+
     def __init__(self, config: AudioConfig, on_chunk: Callable[[np.ndarray], None] | None = None):
         self.cfg = config
         self.on_chunk = on_chunk
@@ -33,9 +36,11 @@ class Recorder:
         self._recording = False
         self._lock = threading.Lock()
         self._mic_rate: int = config.sample_rate
+        self._mic_device_name: str | None = None
         self._sys_rate: int = 16000
         self._processed_audio: np.ndarray | None = None
         self._record_start: datetime.datetime | None = None
+        self._system_audio_device_name: str | None = None
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -46,6 +51,14 @@ class Recorder:
     @property
     def has_audio(self) -> bool:
         return self._processed_audio is not None and self._processed_audio.size > 0
+
+    @property
+    def system_audio_active(self) -> bool:
+        """Return True when a system-audio capture path is currently active."""
+        return (
+            self._sys_stream is not None
+            or self._parec_proc is not None
+        )
 
     @property
     def duration_seconds(self) -> float:
@@ -71,22 +84,30 @@ class Recorder:
             self._sys_frames.clear()
         self._processed_audio = None
         self._record_start = datetime.datetime.now()
+        self._system_audio_device_name = None
 
         # ── Mic stream ─────────────────────────────────────────────────
         try:
-            dev_info = sd.query_devices(kind="input")
+            mic_device = self._select_mic_input_device()
+            dev_info = sd.query_devices(mic_device)
             self._mic_rate = int(dev_info["default_samplerate"])
+            self._mic_device_name = str(dev_info["name"])
         except Exception:
+            mic_device = None
             self._mic_rate = 44100
+            self._mic_device_name = None
 
         self._recording = True
         self._mic_stream = sd.InputStream(
+            device=mic_device,
             samplerate=self._mic_rate,
             channels=1,
             dtype=self.cfg.dtype,
             callback=self._mic_callback,
         )
         self._mic_stream.start()
+        if self._mic_device_name:
+            print(f"[Recorder] Capturing microphone: {self._mic_device_name}")
 
         # ── System audio stream (monitor source) ──────────────────────
         if self.cfg.capture_system_audio:
@@ -167,6 +188,36 @@ class Recorder:
             if d["max_input_channels"] > 0
         ]
 
+    @staticmethod
+    def _select_mic_input_device() -> int | None:
+        """Choose a microphone without forcing a Bluetooth headset into call mode."""
+        if platform.system() != "Darwin":
+            return None
+
+        try:
+            default_input, default_output = sd.default.device
+            devices = sd.query_devices()
+            input_device = devices[default_input]
+            output_device = devices[default_output]
+        except Exception:
+            return None
+
+        input_name = str(input_device["name"]).lower()
+        output_name = str(output_device["name"]).lower()
+        if input_name != output_name:
+            return default_input
+
+        for index, device in enumerate(devices):
+            name = str(device["name"]).lower()
+            if (
+                device["max_input_channels"] > 0
+                and ("macbook" in name or "built-in" in name)
+                and ("microphone" in name or "mic" in name)
+            ):
+                return index
+
+        return default_input
+
     # ── System audio capture ──────────────────────────────────────────────
 
     def _start_system_capture(self) -> None:
@@ -220,31 +271,37 @@ class Recorder:
             print(f"[Recorder] Failed to start parec: {exc}")
             self._parec_proc = None
 
-    # ── macOS: BlackHole / virtual audio device ────────────────────────────
+    # ── macOS: loopback device ─────────────────────────────────────────────
 
     def _start_system_capture_macos(self) -> None:
-        """Find BlackHole or similar virtual audio device for system audio capture."""
-        blackhole_idx = self._find_blackhole_device()
-        if blackhole_idx is None:
-            print("[Recorder] No virtual audio device found — mic only")
-            print("[Recorder] Install BlackHole for system audio capture:")
-            print("[Recorder]   brew install blackhole-2ch")
-            print("[Recorder]   Then create a Multi-Output Device in Audio MIDI Setup")
+        """Capture system audio from a configured loopback input device."""
+        system_audio_idx = self._find_macos_system_audio_device()
+        if system_audio_idx is None:
+            print("[Recorder] No system-audio loopback device found — mic only")
             return
 
         try:
-            dev_info = sd.query_devices(blackhole_idx)
+            dev_info = sd.query_devices(system_audio_idx)
             self._sys_rate = int(dev_info["default_samplerate"])
+            channels = max(1, min(int(dev_info["max_input_channels"]), 2))
+
+            sd.check_input_settings(
+                device=system_audio_idx,
+                samplerate=self._sys_rate,
+                channels=channels,
+                dtype=self.cfg.dtype,
+            )
 
             self._sys_stream = sd.InputStream(
-                device=blackhole_idx,
+                device=system_audio_idx,
                 samplerate=self._sys_rate,
-                channels=1,
+                channels=channels,
                 dtype=self.cfg.dtype,
                 callback=self._sys_callback,
             )
             self._sys_stream.start()
-            print(f"[Recorder] Capturing system audio: {dev_info['name']} (device {blackhole_idx})")
+            self._system_audio_device_name = str(dev_info["name"])
+            print(f"[Recorder] Capturing system audio: {dev_info['name']} (device {system_audio_idx})")
         except Exception as exc:
             print(f"[Recorder] Failed to open virtual audio device: {exc}")
             self._sys_stream = None
@@ -303,17 +360,30 @@ class Recorder:
             self._sys_frames.append(indata.copy())
 
     @staticmethod
-    def _find_blackhole_device() -> int | None:
-        """Find a BlackHole or virtual audio loopback device index."""
+    def _find_macos_system_audio_device() -> int | None:
+        """Find the best installed macOS virtual system-audio input device."""
         devices = sd.query_devices()
-        # Search for common virtual audio device names
-        virtual_names = ["blackhole", "loopback", "soundflower", "virtual"]
+        loopback_names = [
+            "blackhole",
+            "loopback",
+            "soundflower",
+            "vb-cable",
+            "parrot audio",
+        ]
+        candidates: list[tuple[int, int]] = []
         for i, d in enumerate(devices):
             if d["max_input_channels"] > 0:
                 name_lower = d["name"].lower()
-                if any(v in name_lower for v in virtual_names):
-                    return i
-        return None
+                for score, name in enumerate(reversed(loopback_names), start=1):
+                    if name in name_lower:
+                        candidates.append((score, i))
+                        break
+
+        if not candidates:
+            return None
+
+        candidates.sort(reverse=True)
+        return candidates[0][1]
 
     @staticmethod
     def _find_windows_loopback_device() -> int | None:
@@ -479,11 +549,15 @@ class Recorder:
         else:
             return np.array([], dtype=np.float32)
 
-        # Normalize
+        rms = float(np.sqrt(np.mean(np.square(audio))))
+        if rms < self._SILENCE_RMS_THRESHOLD:
+            return np.array([], dtype=np.float32)
+
+        # Normalize recorded speech while avoiding excessive gain on room noise.
         peak = np.max(np.abs(audio))
         if 0 < peak < 0.1:
-            audio = audio * (0.9 / peak)
+            audio = audio * min(8.0, 0.9 / peak)
         elif peak > 1.0:
             audio = audio / peak
 
-        return audio
+        return audio.astype(np.float32, copy=False)

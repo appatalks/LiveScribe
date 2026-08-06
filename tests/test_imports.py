@@ -1,14 +1,21 @@
 """Tests for core module imports and platform-aware behavior."""
 
 import platform
+from subprocess import CompletedProcess
+from unittest import mock
 
 
 class TestImports:
     """Verify all core modules import without errors."""
 
     def test_import_config(self):
-        from livescriber.config import AppConfig, AudioConfig, TranscriptionConfig, SummarizerConfig
-        assert AppConfig is not None
+        from livescriber.config import AppConfig, AudioConfig, SummarizerConfig, TranscriptionConfig
+        assert all(config is not None for config in (
+            AppConfig,
+            AudioConfig,
+            SummarizerConfig,
+            TranscriptionConfig,
+        ))
 
     def test_import_recorder(self):
         from livescriber.recorder import Recorder
@@ -19,7 +26,7 @@ class TestImports:
         assert Transcriber is not None
 
     def test_import_summarizer(self):
-        from livescriber.summarizer import Summarizer, LOCAL_MODEL_CATALOG
+        from livescriber.summarizer import LOCAL_MODEL_CATALOG, Summarizer
         assert Summarizer is not None
         assert len(LOCAL_MODEL_CATALOG) >= 4
 
@@ -77,3 +84,53 @@ class TestSummarizerPlatform:
         assert Summarizer._copilot_stderr_has_error("") is False
         assert Summarizer._copilot_stderr_has_error("Error: auth failed") is True
         assert Summarizer._copilot_stderr_has_error("No authentication information found") is True
+
+    def test_copilot_model_options_are_parsed_from_cli_help(self):
+        from livescriber.summarizer import Summarizer
+
+        config_help = """
+`model`: AI model to use for Copilot CLI.
+  - "claude-sonnet-5"
+  - "gpt-5.6-terra"
+
+`contextTier`: context window tier.
+"""
+        with mock.patch.object(
+            Summarizer,
+            "_build_copilot_command",
+            return_value=["copilot", "help", "config"],
+        ), mock.patch(
+            "livescriber.summarizer.subprocess.run",
+            return_value=CompletedProcess([], 0, stdout=config_help, stderr=""),
+        ):
+            assert Summarizer.get_copilot_model_options() == [
+                "auto",
+                "claude-sonnet-5",
+                "gpt-5.6-terra",
+            ]
+
+    def test_copilot_model_options_fall_back_to_auto(self):
+        from livescriber.summarizer import Summarizer
+
+        with mock.patch.object(
+            Summarizer,
+            "_build_copilot_command",
+            return_value=["copilot", "help", "config"],
+        ), mock.patch(
+            "livescriber.summarizer.subprocess.run",
+            return_value=CompletedProcess([], 1, stdout="", stderr="failed"),
+        ):
+            assert Summarizer.get_copilot_model_options() == ["auto"]
+
+    def test_macos_copilot_login_quotes_paths_with_spaces(self):
+        from livescriber.summarizer import Summarizer
+
+        copilot_path = "/Applications/Visual Studio Code/copilot"
+        with mock.patch("livescriber.summarizer.platform.system", return_value="Darwin"), \
+             mock.patch("livescriber.summarizer.shutil.which", return_value=copilot_path), \
+             mock.patch("livescriber.summarizer.subprocess.Popen") as popen:
+            ok, _ = Summarizer.launch_copilot_login()
+
+        assert ok is True
+        apple_script = popen.call_args.args[0][2]
+        assert "'/Applications/Visual Studio Code/copilot' login" in apple_script

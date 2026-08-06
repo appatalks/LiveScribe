@@ -41,7 +41,7 @@ class TranscriptionConfig:
 class SummarizerConfig:
     backend: str = "local"            # copilot | local | ollama-like | openai
     # Copilot CLI settings (uses copilot --prompt)
-    copilot_model: str = "claude-sonnet-4.5"
+    copilot_model: str = "auto"
     # Ollama settings
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
@@ -115,6 +115,14 @@ class AppConfig:
                     summarizer_data["local_model_key"] = "mistral-nemo-12b-instruct"
                 if summarizer_data.get("local_context_window") in (None, 4096):
                     summarizer_data["local_context_window"] = 8192
+                if summarizer_data.get("copilot_model") in {
+                    "gpt-5.1",
+                    "gpt-5.1-codex",
+                    "gpt-5.1-codex-mini",
+                    "gpt-5.1-codex-max",
+                    "gemini-3-pro-preview",
+                }:
+                    summarizer_data["copilot_model"] = "auto"
 
                 cfg.audio = AudioConfig(**data.get("audio", {}))
                 cfg.transcription = TranscriptionConfig(**data.get("transcription", {}))

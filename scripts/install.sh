@@ -104,13 +104,10 @@ elif [[ "$(uname)" == "Darwin" ]]; then
         info "Installing portaudio via Homebrew…"
         brew install portaudio
     fi
-    # BlackHole for system audio capture (optional)
-    if ! brew list blackhole-2ch &>/dev/null 2>&1; then
-        warn "BlackHole not installed — system audio capture won't work"
-        info "To capture system audio (e.g., other people in calls), install BlackHole:"
-        echo -e "    ${CYAN}brew install blackhole-2ch${NC}"
-        echo -e "    Then open ${CYAN}Audio MIDI Setup${NC} and create a Multi-Output Device"
-        echo -e "    combining your speakers + BlackHole 2ch."
+    if ! brew list --cask blackhole-2ch &>/dev/null; then
+        info "Installing BlackHole 2ch for system audio capture…"
+        brew install --cask blackhole-2ch
+        warn "Restart macOS before using system audio capture so CoreAudio can load BlackHole."
     else
         ok "BlackHole detected — system audio capture available"
     fi

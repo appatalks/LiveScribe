@@ -207,8 +207,12 @@ class SettingsDialog(QDialog):
         self.cfg = config
         self._ui_lang = config.ui.ui_language
         self.setWindowTitle(self._t("settings_title"))
-        self.setMinimumWidth(440)
-        self.setMinimumHeight(860)
+        self.setMinimumSize(520, 560)
+        available = QApplication.primaryScreen().availableGeometry()
+        self.resize(
+            min(620, available.width() - 80),
+            min(760, available.height() - 80),
+        )
         self._downloading_local_model = False
 
         icon_path = _resolve_app_icon_path()
@@ -229,8 +233,10 @@ class SettingsDialog(QDialog):
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
         settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         settings_widget = QWidget()
         layout = QVBoxLayout(settings_widget)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
         settings_scroll.setWidget(settings_widget)
         self._tabs.addTab(settings_scroll, self._t("settings"))
@@ -238,6 +244,7 @@ class SettingsDialog(QDialog):
         # ── Transcription settings ─────────────────────────────────────
         tx_group = QGroupBox(self._t("grp_transcription"))
         tx_form = QFormLayout(tx_group)
+        self._configure_settings_form(tx_form)
 
         self.model_combo = QComboBox()
         self.model_combo.addItems([
@@ -271,6 +278,7 @@ class SettingsDialog(QDialog):
         # ── Summarization settings ─────────────────────────────────────
         sum_group = QGroupBox(self._t("grp_summarization"))
         sum_form = QFormLayout(sum_group)
+        self._configure_settings_form(sum_form)
 
         self.sum_backend_combo = QComboBox()
         self.sum_backend_combo.addItems(["copilot", "local", "ollama-like", "openai"])
@@ -294,14 +302,16 @@ class SettingsDialog(QDialog):
 
         self.copilot_group = QGroupBox("Copilot")
         copilot_form = QFormLayout(self.copilot_group)
+        self._configure_settings_form(copilot_form)
 
         self.copilot_model_combo = QComboBox()
-        self.copilot_model_combo.addItems([
-            "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5",
-            "gpt-5", "gpt-5.1", "gpt-5.1-codex-mini", "gpt-5.1-codex",
-            "gemini-3-pro-preview",
-        ])
-        self.copilot_model_combo.setCurrentText(config.summarizer.copilot_model)
+        self.copilot_model_combo.addItems(Summarizer.get_copilot_model_options())
+        model_index = self.copilot_model_combo.findText(config.summarizer.copilot_model)
+        self.copilot_model_combo.setCurrentIndex(max(model_index, 0))
+        self.copilot_model_combo.setToolTip(
+            "Models are read from the installed Copilot CLI. "
+            "Auto lets Copilot choose a model available to your account."
+        )
         copilot_form.addRow("Model:", self.copilot_model_combo)
 
         copilot_auth_row = QHBoxLayout()
@@ -320,6 +330,7 @@ class SettingsDialog(QDialog):
         # ── Embedded local model ─────────────────────────────────────
         self.embedded_group = QGroupBox("Embedded Local Summarizer")
         embedded_form = QFormLayout(self.embedded_group)
+        self._configure_settings_form(embedded_form)
 
         self.local_model_combo = QComboBox()
         self._local_model_options = Summarizer.get_local_model_options()
@@ -353,6 +364,7 @@ class SettingsDialog(QDialog):
         # ── Local server (Ollama-like / LM Studio) ───────────────────
         self.local_server_group = QGroupBox("Ollama-Like Server")
         local_form = QFormLayout(self.local_server_group)
+        self._configure_settings_form(local_form)
 
         self.ollama_url_edit = QLineEdit(config.summarizer.ollama_url)
         self.ollama_url_edit.setPlaceholderText("http://localhost:11434")
@@ -378,6 +390,7 @@ class SettingsDialog(QDialog):
         # ── API Keys ──────────────────────────────────────────────────
         self.openai_group = QGroupBox("API Keys")
         keys_form = QFormLayout(self.openai_group)
+        self._configure_settings_form(keys_form)
 
         self.openai_key_edit = QLineEdit(config.summarizer.openai_api_key)
         self.openai_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -389,6 +402,7 @@ class SettingsDialog(QDialog):
         # ── Audio settings ─────────────────────────────────────────────
         audio_group = QGroupBox(self._t("grp_audio"))
         audio_form = QFormLayout(audio_group)
+        self._configure_settings_form(audio_form)
 
         self.capture_sys = QCheckBox(self._t("capture_system_audio"))
         self.capture_sys.setChecked(config.audio.capture_system_audio)
@@ -399,6 +413,7 @@ class SettingsDialog(QDialog):
         # ── UI settings ───────────────────────────────────────────────
         ui_group = QGroupBox(self._t("grp_appearance"))
         ui_form = QFormLayout(ui_group)
+        self._configure_settings_form(ui_form)
 
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["dark", "light"])
@@ -432,6 +447,7 @@ class SettingsDialog(QDialog):
 
         project_group = QGroupBox("About LiveScriber")
         project_form = QFormLayout(project_group)
+        self._configure_settings_form(project_form)
 
         project_form.addRow("Version:", QLabel(version))
         project_form.addRow("Author:", QLabel("appatalks"))
@@ -454,6 +470,7 @@ class SettingsDialog(QDialog):
         # ── Check for updates ─────────────────────────────────────────
         update_group = QGroupBox("Updates")
         update_form = QFormLayout(update_group)
+        self._configure_settings_form(update_form)
 
         self._update_status = QLabel(f"Current version: {version}")
         self._update_status.setWordWrap(True)
@@ -468,6 +485,7 @@ class SettingsDialog(QDialog):
         # ── Support ───────────────────────────────────────────────────
         support_group = QGroupBox("Support LiveScriber")
         support_form = QFormLayout(support_group)
+        self._configure_settings_form(support_form)
 
         support_msg = QLabel(
             "LiveScriber is freeware and open source. If it's useful to you, "
@@ -540,6 +558,7 @@ class SettingsDialog(QDialog):
         # ── Pro Registration ──────────────────────────────────────────
         pro_group = QGroupBox("Pro Registration")
         pro_form = QFormLayout(pro_group)
+        self._configure_settings_form(pro_form)
 
         if config.license.registered and config.license.license_key:
             masked = config.license.license_key[:4] + "****" + config.license.license_key[-4:]
@@ -594,6 +613,14 @@ class SettingsDialog(QDialog):
 
         self.cfg.save()
         self.accept()
+
+    @staticmethod
+    def _configure_settings_form(form: QFormLayout):
+        """Keep settings labels and controls readable at narrow dialog widths."""
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(8)
 
     def _on_backend_changed(self, backend: str):
         """Show/hide relevant fields based on backend selection."""
@@ -1240,7 +1267,10 @@ class LiveScriberWindow(QWidget):
             self.record_btn.set_recording(True)
             self._timer.start()
             self._transcript_text = ""
-            self.status_label.setText("Recording…")
+            if self.cfg.audio.capture_system_audio and not self.recorder.system_audio_active:
+                self.status_label.setText("Recording… (microphone only; macOS system audio unavailable)")
+            else:
+                self.status_label.setText("Recording…")
             self.btn_transcribe.setEnabled(False)
             self.btn_summarize.setEnabled(False)
             self.btn_play.setEnabled(False)
@@ -1288,15 +1318,19 @@ class LiveScriberWindow(QWidget):
                 self.transcript_section.clear()
             self.summary_section.clear()
 
+            has_audio = self.recorder.has_audio
             has_live = bool(self._transcript_text)
-            status = f"Recorded {mins}:{secs:02d} — session {self._history_idx + 1}"
-            if has_live:
-                status += " (live transcript ready)"
+            if has_audio:
+                status = f"Recorded {mins}:{secs:02d} — session {self._history_idx + 1}"
+                if has_live:
+                    status += " (live transcript ready)"
+            else:
+                status = "No usable audio captured — check your microphone and system-audio device"
             self.status_label.setText(status)
-            self.btn_transcribe.setEnabled(True)
+            self.btn_transcribe.setEnabled(has_audio)
             self.btn_summarize.setEnabled(has_live)
-            self.btn_play.setEnabled(True)
-            self.btn_save_wav.setEnabled(True)
+            self.btn_play.setEnabled(has_audio)
+            self.btn_save_wav.setEnabled(has_audio)
             self._hist_update_nav()
         except Exception as exc:
             self.status_label.setText(f"Stop error: {exc}")

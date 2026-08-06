@@ -1,6 +1,7 @@
 """Tests for audio processing and WAV export (no real mic required)."""
 
 import numpy as np
+import sounddevice as sd
 
 from livescriber.config import AudioConfig
 from livescriber.recorder import Recorder
@@ -42,6 +43,60 @@ class TestSyntheticAudio:
         resampled = r._resample_to_target(audio, 44100)
         assert abs(len(resampled) - 16000) < 10  # should be ~16000 samples
 
+    def test_low_level_noise_is_not_amplified(self):
+        r = Recorder(AudioConfig())
+        r._mic_rate = 16000
+        r._mic_frames = [np.full((16000, 1), 0.0001, dtype=np.float32)]
+        assert r._process_audio().size == 0
+
+    def test_low_volume_speech_gain_is_capped(self):
+        r = Recorder(AudioConfig())
+        r._mic_rate = 16000
+        r._mic_frames = [np.full((16000, 1), 0.01, dtype=np.float32)]
+        processed = r._process_audio()
+        assert np.max(np.abs(processed)) <= 0.08
+
+
+class TestMacOSSystemAudioDetection:
+    """Verify macOS loopback-device selection without CoreAudio hardware."""
+
+    def test_meeting_app_virtual_device_is_not_used_automatically(self, monkeypatch):
+        devices = [
+            {"name": "MacBook Pro Microphone", "max_input_channels": 1},
+            {"name": "Microsoft Teams Audio", "max_input_channels": 1},
+        ]
+        monkeypatch.setattr("livescriber.recorder.sd.query_devices", lambda: devices)
+        assert Recorder._find_macos_system_audio_device() is None
+
+    def test_blackhole_is_detected(self, monkeypatch):
+        devices = [
+            {"name": "Microsoft Teams Audio", "max_input_channels": 1},
+            {"name": "BlackHole 2ch", "max_input_channels": 2},
+        ]
+        monkeypatch.setattr("livescriber.recorder.sd.query_devices", lambda: devices)
+        assert Recorder._find_macos_system_audio_device() == 1
+
+    def test_builtin_microphone_avoids_bluetooth_call_mode(self, monkeypatch):
+        devices = [
+            {"name": "WH-CH520", "max_input_channels": 1},
+            {"name": "WH-CH520", "max_input_channels": 0},
+            {"name": "MacBook Pro Microphone", "max_input_channels": 1},
+        ]
+        monkeypatch.setattr("livescriber.recorder.platform.system", lambda: "Darwin")
+        monkeypatch.setattr("livescriber.recorder.sd.default.device", [0, 1])
+        monkeypatch.setattr("livescriber.recorder.sd.query_devices", lambda: devices)
+        assert Recorder._select_mic_input_device() == 2
+
+    def test_default_microphone_is_used_when_not_shared_with_output(self, monkeypatch):
+        devices = [
+            {"name": "USB Microphone", "max_input_channels": 1},
+            {"name": "WH-CH520", "max_input_channels": 0},
+        ]
+        monkeypatch.setattr("livescriber.recorder.platform.system", lambda: "Darwin")
+        monkeypatch.setattr("livescriber.recorder.sd.default.device", [0, 1])
+        monkeypatch.setattr("livescriber.recorder.sd.query_devices", lambda: devices)
+        assert Recorder._select_mic_input_device() == 0
+
 
 class TestLiveChunkFiltering:
     """Verify the transcriber's live chunk pre-filtering without loading Whisper."""
@@ -67,5 +122,5 @@ class TestLiveChunkFiltering:
         try:
             devices = Recorder.list_devices()
             assert isinstance(devices, list)
-        except Exception:
+        except (OSError, sd.PortAudioError):
             pass  # sound system may not be available in CI

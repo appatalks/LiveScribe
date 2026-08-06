@@ -35,7 +35,7 @@ source .venv/bin/activate
 livescriber
 ```
 
-> **Tip:** To capture both sides of a call on macOS, install [BlackHole](https://existential.audio/blackhole/) (`brew install blackhole-2ch`) and set up a Multi-Output Device in Audio MIDI Setup.
+The setup script installs [BlackHole](https://existential.audio/blackhole/) automatically for system-audio capture. Restart macOS after the first installation, then create a Multi-Output Device in Audio MIDI Setup that includes both your headphones or speakers and `BlackHole 2ch`. Set it as the system output so LiveScriber can capture call audio while you continue listening normally.
 
 ### Linux
 

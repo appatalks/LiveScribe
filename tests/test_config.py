@@ -5,7 +5,13 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from livescriber.config import AppConfig, AudioConfig, TranscriptionConfig, SummarizerConfig, UIConfig
+from livescriber.config import (
+    AppConfig,
+    AudioConfig,
+    SummarizerConfig,
+    TranscriptionConfig,
+    UIConfig,
+)
 
 
 class TestConfigDefaults:
@@ -25,6 +31,7 @@ class TestConfigDefaults:
     def test_summarizer_defaults(self):
         cfg = SummarizerConfig()
         assert cfg.backend == "local"
+        assert cfg.copilot_model == "auto"
         assert cfg.local_model_key == "mistral-nemo-12b-instruct"
         assert cfg.local_context_window == 8192
 
@@ -80,6 +87,24 @@ class TestConfigMigration:
         with mock.patch("livescriber.config.CONFIG_PATH", tmp):
             cfg = AppConfig.load()
             assert cfg.summarizer.local_model_key == "llama-3.1-4b-instruct"
+
+        tmp.unlink(missing_ok=True)
+
+    def test_retired_copilot_model_migrated(self):
+        data = {
+            "summarizer": {"copilot_model": "gpt-5.1"},
+            "audio": {},
+            "transcription": {},
+            "ui": {},
+            "license": {},
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            tmp = Path(f.name)
+
+        with mock.patch("livescriber.config.CONFIG_PATH", tmp):
+            cfg = AppConfig.load()
+            assert cfg.summarizer.copilot_model == "auto"
 
         tmp.unlink(missing_ok=True)
 
