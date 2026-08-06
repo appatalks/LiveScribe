@@ -1636,8 +1636,23 @@ class LiveScriberWindow(QWidget):
 
         import threading
         def _play():
-            sd.play(audio, samplerate=self.recorder.cfg.sample_rate)
-            sd.wait()
+            try:
+                sd.play(audio, samplerate=self.recorder.cfg.sample_rate)
+                sd.wait()
+            except sd.PortAudioError:
+                try:
+                    sd.stop()
+                    sd.play(audio, samplerate=self.recorder.cfg.sample_rate)
+                    sd.wait()
+                except sd.PortAudioError as exc:
+                    from PyQt6.QtCore import Q_ARG, QMetaObject, Qt as QtNS
+                    QMetaObject.invokeMethod(
+                        self,
+                        "_on_playback_error",
+                        QtNS.ConnectionType.QueuedConnection,
+                        Q_ARG(str, str(exc)),
+                    )
+                    return
             # Reset button on main thread
             from PyQt6.QtCore import QMetaObject, Qt as QtNS
             QMetaObject.invokeMethod(
@@ -1659,6 +1674,11 @@ class LiveScriberWindow(QWidget):
         self.btn_play.clicked.disconnect()
         self.btn_play.clicked.connect(self._play_audio)
         self.status_label.setText("Ready")
+
+    @pyqtSlot(str)
+    def _on_playback_error(self, error: str):
+        self._on_playback_done()
+        self.status_label.setText(f"Playback unavailable: {error}")
 
     @pyqtSlot()
     def _save_wav(self):
